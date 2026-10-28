@@ -1,0 +1,171 @@
+rules_version = '2';
+
+// TubigLink Alegria: Firestore Security Rules
+//
+// Design principles
+//  - Roles live in users/{uid} (single source of truth). Deactivating a profile revokes
+//    access immediately, with no waiting for ID tokens to expire.
+//  - Residents have no accounts. They never read Firestore directly for requests: submission
+//    and tracking go through Cloud Functions (Admin SDK), so private data is never exposed.
+//  - waterRequests, requestPrivateDetails, statusHistory, auditLogs, publicStats and rateLimits
+//    are never client-writable. Status changes go through trusted functions.
+//  - Barangay coordinators only reach records whose barangayId matches their assignment.
+//  - Nothing is hard-deleted by clients (archive / deactivate instead) so the audit trail holds.
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ---------- helpers ----------
+    function signedIn() { return request.auth != null; }
+    function profilePath() { return /databases/$(database)/documents/users/$(request.auth.uid); }
+    function hasProfile() { return signedIn() && exists(profilePath()); }
+    function me() { return get(profilePath()).data; }
+    function activeStaff() { return hasProfile() && me().active == true; }
+    function isMuni() { return activeStaff() && (me().role == 'municipal_admin' || me().role == 'system_admin'); }
+    function isCoordinator() { return activeStaff() && me().role == 'barangay_coordinator'; }
+    function isProvider() { return activeStaff() && me().role == 'provider'; }
+    function coordinatorOf(barangayId) { return isCoordinator() && me().assignedBarangayId == barangayId; }
+    function canSeeBarangay(barangayId) { return isMuni() || coordinatorOf(barangayId); }
+    function stampedByMe(d) { return d.updatedBy == request.auth.uid; }
+
+    // ---------- users (staff profiles; written only by Cloud Functions) ----------
+    match /users/{uid} {
+      allow get: if signedIn() && (request.auth.uid == uid || isMuni());
+      allow list: if isMuni();
+      allow write: if false;
+    }
+
+    // ---------- barangays ----------
+    match /barangays/{id} {
+      allow read: if true;
+      allow create, update: if isMuni()
+        && stampedByMe(request.resource.data)
+        && request.resource.data.name is string && request.resource.data.name.size() > 1
+        && request.resource.data.active is bool;
+      allow delete: if false;
+    }
+
+    // ---------- resident requests (server-written only) ----------
+    match /waterRequests/{id} {
+      allow read: if signedIn() && canSeeBarangay(resource.data.barangayId);
+      allow write: if false;
+    }
+    // Contact details are never read directly from the browser. Staff fetch them through the
+    // revealRequestContact function, which checks scope and writes an audit entry for each view.
+    match /requestPrivateDetails/{id} {
+      allow read, write: if false;
+    }
+    match /statusHistory/{id} {
+      allow read: if signedIn() && canSeeBarangay(resource.data.barangayId);
+      allow write: if false;
+    }
+
+    // ---------- announcements ----------
+    function announcementShape(d) {
+      return d.title is string && d.title.size() >= 3 && d.title.size() <= 150
+        && d.body is string && d.body.size() >= 3 && d.body.size() <= 5000
+        && d.status in ['draft', 'published', 'archived']
+        && d.targetBarangayIds is list
+        && stampedByMe(d)
+        && (d.status != 'published' || d.publishedBy == request.auth.uid || d.publishedBy is string);
+    }
+    function mayWriteAnnouncement(d) {
+      return isMuni()
+        || (isCoordinator() && d.targetBarangayIds.size() == 1 && d.targetBarangayIds[0] == me().assignedBarangayId);
+    }
+    match /announcements/{id} {
+      allow read: if resource.data.status == 'published' || activeStaff();
+      allow create: if mayWriteAnnouncement(request.resource.data) && announcementShape(request.resource.data);
+      allow update: if mayWriteAnnouncement(resource.data) && mayWriteAnnouncement(request.resource.data)
+        && announcementShape(request.resource.data);
+      allow delete: if false;
+    }
+
+    // ---------- distribution schedules (public read; staff write) ----------
+    function scheduleShape(d) {
+      return d.status in ['planned', 'confirmed', 'in_progress', 'completed', 'cancelled']
+        && d.date is string && d.date.size() == 10
+        && d.barangayId is string
+        && d.locationName is string && d.locationName.size() > 0
+        && stampedByMe(d)
+        // A schedule can only be completed with its recorded delivery outcome.
+        && (d.status != 'completed' || (d.quantityDistributed is number && d.quantityDistributed >= 0
+            && d.outcomeNote is string && d.outcomeNote.size() > 0));
+    }
+    // Confirmed / in progress / completed must name the staff member who confirmed it.
+    function confirmedByStaff(d, previousVerifier) {
+      return !(d.status in ['confirmed', 'in_progress', 'completed'])
+        || (d.verifiedBy is string && (d.verifiedBy == request.auth.uid || d.verifiedBy == previousVerifier));
+    }
+    match /distributionSchedules/{id} {
+      allow read: if true;
+      allow create: if (isMuni() || coordinatorOf(request.resource.data.barangayId))
+        && scheduleShape(request.resource.data)
+        && confirmedByStaff(request.resource.data, null);
+      allow update: if (isMuni() || coordinatorOf(resource.data.barangayId))
+        && request.resource.data.barangayId == resource.data.barangayId
+        && scheduleShape(request.resource.data)
+        && confirmedByStaff(request.resource.data, resource.data.get('verifiedBy', null));
+      allow delete: if false;
+    }
+
+    // ---------- water points ----------
+    function waterPointShape(d) {
+      return d.name is string && d.name.size() >= 2 && d.name.size() <= 120
+        && d.barangayId is string
+        && d.published is bool
+        && d.status in ['operational', 'limited', 'closed']
+        && stampedByMe(d);
+    }
+    match /waterPoints/{id} {
+      allow read: if resource.data.published == true || activeStaff();
+      allow create: if (isMuni() || coordinatorOf(request.resource.data.barangayId)) && waterPointShape(request.resource.data);
+      allow update: if (isMuni() || coordinatorOf(resource.data.barangayId))
+        && request.resource.data.barangayId == resource.data.barangayId
+        && waterPointShape(request.resource.data);
+      allow delete: if false;
+    }
+
+    // ---------- deliveries / inventory ----------
+    function deliveryShape(d) {
+      return d.status in ['planned', 'dispatched', 'delivered', 'failed']
+        && d.barangayId is string
+        && stampedByMe(d)
+        && (d.status != 'delivered' || (d.quantityDelivered is number && d.quantityDelivered >= 0));
+    }
+    match /deliveries/{id} {
+      allow read: if canSeeBarangay(resource.data.barangayId)
+        || (isProvider() && resource.data.operatorUid == request.auth.uid);
+      allow create: if (isMuni() || coordinatorOf(request.resource.data.barangayId)) && deliveryShape(request.resource.data);
+      allow update: if (
+          ((isMuni() || coordinatorOf(resource.data.barangayId))
+            && request.resource.data.barangayId == resource.data.barangayId)
+          || (isProvider() && resource.data.operatorUid == request.auth.uid
+            && request.resource.data.diff(resource.data).affectedKeys()
+                 .hasOnly(['quantityDelivered', 'remainingStock', 'status', 'completedAt', 'notes', 'updatedBy', 'updatedAt']))
+        ) && deliveryShape(request.resource.data);
+      allow delete: if false;
+    }
+
+    // ---------- audit log (written by function triggers only) ----------
+    match /auditLogs/{id} {
+      allow read: if isMuni();
+      allow write: if false;
+    }
+
+    // ---------- public operational config & aggregated stats ----------
+    match /appSettings/{id} {
+      allow read: if true;
+      allow write: if isMuni() && stampedByMe(request.resource.data);
+    }
+    match /publicStats/{id} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    // ---------- internal (functions only) ----------
+    match /rateLimits/{id} {
+      allow read, write: if false;
+    }
+  }
+}
