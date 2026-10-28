@@ -1,17 +1,17 @@
 {
-  "name": "tubiglink-alegria",
+  "name": "agos-alegria",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "TubigLink Alegria - municipality-wide water assistance and monitoring PWA",
+  "description": "AGOS Alegria - municipality-wide water assistance and monitoring PWA",
   "scripts": {
     "dev": "vite",
     "build": "vue-tsc --noEmit && vite build",
     "build:fast": "vite build",
     "preview": "vite preview",
     "typecheck": "vue-tsc --noEmit",
-    "emulators": "firebase emulators:start",
-    "deploy": "npm run build && firebase deploy",
+    "emulators": "firebase emulators:start --project default",
+    "deploy": "npm run build && firebase deploy --project default",
     "seed": "node scripts/seed.mjs",
     "bootstrap-admin": "node scripts/bootstrap-admin.mjs"
   },

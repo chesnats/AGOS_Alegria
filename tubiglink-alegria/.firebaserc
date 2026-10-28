@@ -1,1 +1,7 @@
-{ "projects": { "default": "tubiglink-alegria" } }
+{
+  "projects": {
+    "default": "agos-alegria-74e97"
+  },
+  "targets": {},
+  "etags": {}
+}

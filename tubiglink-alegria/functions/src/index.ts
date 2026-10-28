@@ -324,7 +324,7 @@ export const updateRequestStatus = onCall(callableOptions, async (req) => {
       throw new HttpsError('permission-denied', 'Only the municipal team can set that status.')
     }
 
-    const update: Record<string, unknown> = {
+     const update: Record<string, any> = {
       status: newStatus,
       updatedAt: FieldValue.serverTimestamp(),
       lastPublicNote: publicNote || null,

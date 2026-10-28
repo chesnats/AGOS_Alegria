@@ -46,11 +46,19 @@ export interface WaterRequest {
   possibleDuplicate: boolean
   duplicateOf: string | null
   lastPublicNote?: string | null
+  publicTimeline: PublicTimelineEntry[]
   createdAt: Ts
   updatedAt: Ts
   verifiedAt?: Ts
   assistanceAt?: Ts
   resolvedAt?: Ts
+}
+
+/** The resident-safe progress history stored with a request for Spark-plan tracking. */
+export interface PublicTimelineEntry {
+  status: RequestStatus
+  at: number
+  note: string
 }
 
 export interface PrivateDetails {

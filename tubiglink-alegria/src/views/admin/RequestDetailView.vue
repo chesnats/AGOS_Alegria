@@ -78,7 +78,7 @@ async function submit(): Promise<void> {
   }
 }
 
-// ---- private contact details (every view is recorded in the audit log) ----
+// ---- private contact details (restricted by Firestore rules to the staff member's barangay) ----
 const contact = shallowRef<RevealedContact | null>(null)
 const contactBusy = ref(false)
 const contactError = ref('')
@@ -159,7 +159,7 @@ watch(
             <p class="small muted mt">Do not copy these details into public notes or chats.</p>
           </template>
           <template v-else>
-            <p class="small">Contact details are hidden by default. Viewing them is recorded in the audit log with your name.</p>
+            <p class="small">Contact details are hidden by default and only available to staff assigned to this barangay.</p>
             <p v-if="contactError" class="error" role="alert">{{ contactError }}</p>
             <button class="btn secondary" type="button" :disabled="contactBusy" @click="reveal">
               {{ contactBusy ? 'Loading…' : 'Show contact details' }}

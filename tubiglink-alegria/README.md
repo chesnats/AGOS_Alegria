@@ -42,8 +42,8 @@ announcements, records deliveries and exports reports.
 
 ## Set up
 
-Prerequisites: Node 20+, a Google account, a Firebase project on the **Blaze (pay-as-you-go) plan** (Cloud Functions require it; a municipal
-pilot is expected to stay within the free allowance, but set a budget alert).
+Prerequisites: Node 20+ and a Google account. The app can submit and track requests directly through Firestore on Firebase's Spark plan.
+Cloud Functions are optional; they require Blaze and add server-side rate limiting, duplicate detection, audited contact reveals, and staff-account creation.
 
 ```bash
 npm install
@@ -53,9 +53,9 @@ cp .env.example .env.local        # fill in values from Firebase console > Proje
 
 1. Create the Firebase project; enable **Authentication → Email/Password**, **Firestore** (location `asia-southeast1`), **Hosting**.
 2. Put your project id in `.firebaserc`.
-3. Deploy rules, indexes and functions:
+3. Deploy rules and indexes:
    ```bash
-   firebase deploy --only firestore,functions
+   firebase deploy --only firestore
    ```
 4. Seed the reference data and create the first administrator (needs a service-account key; never commit it):
    ```bash
@@ -64,7 +64,8 @@ cp .env.example .env.local        # fill in values from Firebase console > Proje
    npm run bootstrap-admin -- --email you@example.gov.ph --name "Your Name"
    ```
    The script prints a one-time link for setting the password. That person then creates every other account under **Staff** in the console.
-5. Build and deploy the app: `npm run deploy` (runs the type-check, builds, deploys everything).
+5. Build and deploy the Spark-plan app: `firebase deploy --only hosting,firestore --project default`.
+   Use `npm run deploy` only after upgrading to Blaze, because it also deploys Cloud Functions.
 6. Sign in at `/admin/login`, open **Settings**, and add the official municipal contact numbers. Check **Barangays**.
 
 ### Run locally with the Firebase emulators

@@ -19,7 +19,7 @@ if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || name.length < 2) {
   process.exit(1)
 }
 
-initializeApp({ projectId: process.env.GCLOUD_PROJECT || process.env.GOOGLE_CLOUD_PROJECT || 'tubiglink-alegria' })
+initializeApp({ projectId: process.env.GCLOUD_PROJECT || process.env.GOOGLE_CLOUD_PROJECT || 'agos-alegria-74e97' })
 const auth = getAuth()
 const db = getFirestore()
 

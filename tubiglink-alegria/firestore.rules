@@ -5,10 +5,9 @@ rules_version = '2';
 // Design principles
 //  - Roles live in users/{uid} (single source of truth). Deactivating a profile revokes
 //    access immediately, with no waiting for ID tokens to expire.
-//  - Residents have no accounts. They never read Firestore directly for requests: submission
-//    and tracking go through Cloud Functions (Admin SDK), so private data is never exposed.
-//  - waterRequests, requestPrivateDetails, statusHistory, auditLogs, publicStats and rateLimits
-//    are never client-writable. Status changes go through trusted functions.
+//  - Residents have no accounts. They may create a request directly, but contact details
+//    are stored separately and can only be read by staff in the correct barangay.
+//  - Spark-plan mode cannot enforce server-side throttling, duplicate detection, or audit writes.
 //  - Barangay coordinators only reach records whose barangayId matches their assignment.
 //  - Nothing is hard-deleted by clients (archive / deactivate instead) so the audit trail holds.
 
@@ -45,19 +44,92 @@ service cloud.firestore {
       allow delete: if false;
     }
 
-    // ---------- resident requests (server-written only) ----------
-    match /waterRequests/{id} {
-      allow read: if signedIn() && canSeeBarangay(resource.data.barangayId);
-      allow write: if false;
+    // ---------- resident requests (Spark-plan direct write mode) ----------
+    function requestReferenceIsValid(id) {
+      return id.matches('^TL-[A-HJKMNP-Z2-9]{4}-[A-HJKMNP-Z2-9]{4}$');
     }
-    // Contact details are never read directly from the browser. Staff fetch them through the
-    // revealRequestContact function, which checks scope and writes an audit entry for each view.
+    function validRequestStatus(s) {
+      return s in ['submitted', 'under_verification', 'verified', 'scheduled', 'in_progress', 'resolved', 'referred', 'unable_to_fulfill'];
+    }
+    function validTransition(from, to) {
+      return (from == 'submitted' && to in ['under_verification', 'verified', 'referred', 'unable_to_fulfill'])
+        || (from == 'under_verification' && to in ['verified', 'referred', 'unable_to_fulfill'])
+        || (from == 'verified' && to in ['scheduled', 'in_progress', 'referred', 'unable_to_fulfill', 'resolved'])
+        || (from == 'scheduled' && to in ['in_progress', 'resolved', 'referred', 'unable_to_fulfill'])
+        || (from == 'in_progress' && to in ['scheduled', 'resolved', 'referred', 'unable_to_fulfill'])
+        || (from == 'referred' && to in ['under_verification', 'scheduled', 'in_progress', 'resolved', 'unable_to_fulfill'])
+        || (from == 'unable_to_fulfill' && to in ['verified', 'scheduled', 'in_progress', 'referred', 'resolved'])
+        || (from == 'resolved' && to == 'under_verification');
+    }
+    function validPublicTimelineEntry(e) {
+      return e is map && validRequestStatus(e.status) && e.at is number
+        && e.note is string && e.note.size() <= 400;
+    }
+    function validResidentRequest(d, id) {
+      return d.keys().hasOnly(['referenceNumber', 'barangayId', 'barangayName', 'purok', 'issueType', 'householdMembers', 'duration', 'status', 'possibleDuplicate', 'duplicateOf', 'lastPublicNote', 'publicTimeline', 'createdAt', 'updatedAt'])
+        && requestReferenceIsValid(id) && d.referenceNumber == id
+        && d.barangayId is string && d.barangayName is string
+        && d.barangayName == get(/databases/$(database)/documents/barangays/$(d.barangayId)).data.name
+        && get(/databases/$(database)/documents/barangays/$(d.barangayId)).data.active == true
+        && d.purok is string && d.purok.size() > 0 && d.purok.size() <= 60
+        && d.issueType in ['no_water', 'low_pressure', 'contaminated', 'no_connection', 'source_dry', 'other']
+        && d.householdMembers is int && d.householdMembers >= 1 && d.householdMembers <= 100
+        && d.duration in ['lt1d', 'd1_3', 'd4_7', 'gt7']
+        && d.status == 'submitted' && d.possibleDuplicate == false && d.duplicateOf == null
+        && d.lastPublicNote == 'Your request was received.'
+        && d.publicTimeline is list && d.publicTimeline.size() == 1 && validPublicTimelineEntry(d.publicTimeline[0])
+        && d.publicTimeline[0].status == 'submitted' && d.publicTimeline[0].note == 'Your request was received.'
+        && d.createdAt == request.time && d.updatedAt == request.time;
+    }
+    function validStaffRequestUpdate(before, after) {
+      return activeStaff() && canSeeBarangay(before.barangayId)
+        && after.diff(before).affectedKeys().hasOnly(['status', 'lastPublicNote', 'lastUpdatedBy', 'publicTimeline', 'updatedAt'])
+        && validTransition(before.status, after.status)
+        && (isMuni() || after.status in ['under_verification', 'verified', 'referred'])
+        && after.lastUpdatedBy == request.auth.uid && after.updatedAt == request.time
+        && (after.lastPublicNote == null || (after.lastPublicNote is string && after.lastPublicNote.size() <= 400))
+        && (!(after.status in ['resolved', 'referred', 'unable_to_fulfill']) || (after.lastPublicNote is string && after.lastPublicNote.size() >= 5))
+        && after.publicTimeline is list && after.publicTimeline.size() == before.publicTimeline.size() + 1
+        && validPublicTimelineEntry(after.publicTimeline[after.publicTimeline.size() - 1])
+        && after.publicTimeline[after.publicTimeline.size() - 1].status == after.status
+        && after.publicTimeline[after.publicTimeline.size() - 1].note == (after.lastPublicNote == null ? '' : after.lastPublicNote);
+    }
+    match /waterRequests/{id} {
+      // A reference is randomly generated and is the only way a resident can get this public progress record.
+      allow get: if true;
+      allow list: if signedIn() && canSeeBarangay(resource.data.barangayId);
+      allow create: if validResidentRequest(request.resource.data, id);
+      allow update: if validStaffRequestUpdate(resource.data, request.resource.data);
+      allow delete: if false;
+    }
+    function validPrivateDetails(d, id) {
+      return d.keys().hasOnly(['requestId', 'barangayId', 'contactName', 'contactMethod', 'contactValue', 'landmark', 'description', 'consentAt', 'privacyNoticeVersion', 'locale', 'createdAt'])
+        && d.requestId == id && d.barangayId is string
+        && getAfter(/databases/$(database)/documents/waterRequests/$(id)).data.barangayId == d.barangayId
+        && d.contactName is string && d.contactName.size() <= 80
+        && d.contactMethod in ['phone', 'messenger', 'landmark_only']
+        && d.contactValue is string && d.contactValue.size() <= 100
+        && d.landmark is string && d.landmark.size() <= 160
+        && d.description is string && d.description.size() <= 600
+        && ((d.contactMethod == 'landmark_only' && d.landmark.size() > 0) || (d.contactMethod != 'landmark_only' && d.contactValue.size() > 0))
+        && d.privacyNoticeVersion is string && d.locale is string
+        && d.consentAt == request.time && d.createdAt == request.time;
+    }
     match /requestPrivateDetails/{id} {
-      allow read, write: if false;
+      allow get: if activeStaff() && canSeeBarangay(resource.data.barangayId);
+      allow list: if false;
+      allow create: if validPrivateDetails(request.resource.data, id);
+      allow update, delete: if false;
     }
     match /statusHistory/{id} {
       allow read: if signedIn() && canSeeBarangay(resource.data.barangayId);
-      allow write: if false;
+      allow create: if activeStaff() && canSeeBarangay(request.resource.data.barangayId)
+        && request.resource.data.keys().hasOnly(['requestId', 'barangayId', 'oldStatus', 'newStatus', 'changedBy', 'timestamp', 'publicNote', 'internalNote'])
+        && request.resource.data.changedBy == request.auth.uid
+        && request.resource.data.timestamp == request.time
+        && validTransition(request.resource.data.oldStatus, request.resource.data.newStatus)
+        && getAfter(/databases/$(database)/documents/waterRequests/$(request.resource.data.requestId)).data.status == request.resource.data.newStatus;
+      allow update, delete: if false;
     }
 
     // ---------- announcements ----------

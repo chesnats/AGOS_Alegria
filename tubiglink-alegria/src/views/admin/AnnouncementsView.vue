@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, reactive, ref } from 'vue'
-import { addDoc, collection, doc, limit, orderBy, query, serverTimestamp, updateDoc } from 'firebase/firestore'
+import { addDoc, collection, doc, limit, orderBy, query, serverTimestamp, updateDoc, type UpdateData } from 'firebase/firestore'
 import { db } from '@/firebase'
 import { useAuth } from '@/composables/useAuth'
 import { useBarangays } from '@/composables/useBarangays'
@@ -95,7 +95,7 @@ async function save(status: 'draft' | 'published'): Promise<void> {
   const uid = profile.value.uid
   const prev = editing.value
   try {
-    const data: Record<string, unknown> = {
+    const data: UpdateData<Announcement> = {
       title: form.title.trim(),
       body: form.body.trim(),
       category: form.category,
@@ -123,7 +123,7 @@ async function setStatus(a: Announcement, status: 'published' | 'archived'): Pro
   if (!profile.value) return
   message.value = ''
   try {
-    const data: Record<string, unknown> = { status, updatedAt: serverTimestamp(), updatedBy: profile.value.uid }
+    const data: UpdateData<Announcement> = { status, updatedAt: serverTimestamp(), updatedBy: profile.value.uid }
     if (status === 'published') {
       data.publishedBy = profile.value.uid
       data.publishedAt = serverTimestamp()

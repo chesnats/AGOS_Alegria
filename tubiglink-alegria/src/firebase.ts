@@ -17,7 +17,9 @@ const app = initializeApp({
   appId: env.VITE_FIREBASE_APP_ID
 })
 
-const useEmulators = env.VITE_USE_EMULATORS === 'true'
+// Never point a production build at a visitor's localhost, even when a local
+// .env.local keeps emulator mode enabled for development.
+const useEmulators = import.meta.env.DEV && env.VITE_USE_EMULATORS === 'true'
 
 if (env.VITE_APPCHECK_SITE_KEY && !useEmulators) {
   initializeAppCheck(app, {
