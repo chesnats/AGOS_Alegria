@@ -1,0 +1,11 @@
+[
+  { "id": "compostela", "name": "Compostela", "code": "COMP", "active": true },
+  { "id": "guadalupe", "name": "Guadalupe", "code": "GUAD", "active": true },
+  { "id": "legaspi", "name": "Legaspi", "code": "LEGA", "active": true },
+  { "id": "lepanto", "name": "Lepanto", "code": "LEPA", "active": true },
+  { "id": "madridejos", "name": "Madridejos", "code": "MADR", "active": true },
+  { "id": "montpeller", "name": "Montpeller", "code": "MONT", "active": true },
+  { "id": "poblacion", "name": "Poblacion", "code": "POBL", "active": true },
+  { "id": "santa-filomena", "name": "Santa Filomena", "code": "SFIL", "active": true },
+  { "id": "valencia", "name": "Valencia", "code": "VALE", "active": true }
+]

@@ -1,0 +1,37 @@
+{
+  "name": "agos-alegria",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "AGOS Alegria - municipality-wide water assistance and monitoring PWA",
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc --noEmit && vite build",
+    "build:fast": "vite build",
+    "preview": "vite preview",
+    "typecheck": "vue-tsc --noEmit",
+    "emulators": "firebase emulators:start --project default",
+    "deploy": "npm run build && firebase deploy --project default",
+    "seed": "node scripts/seed.mjs",
+    "bootstrap-admin": "node scripts/bootstrap-admin.mjs"
+  },
+  "dependencies": {
+    "firebase": "^11.0.0",
+    "leaflet": "^1.9.4",
+    "qrcode": "^1.5.4",
+    "vue": "^3.5.0",
+    "vue-router": "^4.4.0"
+  },
+  "devDependencies": {
+    "@types/leaflet": "^1.9.12",
+    "@types/node": "^22.0.0",
+    "@types/qrcode": "^1.5.5",
+    "@vitejs/plugin-vue": "^5.2.0",
+    "firebase-admin": "^12.7.0",
+    "firebase-tools": "^13.0.0",
+    "typescript": "~5.6.0",
+    "vite": "^6.0.0",
+    "vite-plugin-pwa": "^0.21.0",
+    "vue-tsc": "^2.1.0"
+  }
+}
